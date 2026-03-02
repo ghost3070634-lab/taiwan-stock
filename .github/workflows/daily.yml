@@ -10,7 +10,8 @@ jobs:
   daily:
     runs-on: ubuntu-latest
     permissions:
-      contents: write  # 允許用 GITHUB_TOKEN push
+      contents: write
+
     steps:
       - uses: actions/checkout@v4
 
@@ -34,7 +35,7 @@ jobs:
 
       - name: Commit portfolio state if changed
         run: |
-          if git status --porcelain | grep portfolio_breakout_institutional.json; then
+          if git status --porcelain | grep -q "portfolio_breakout_institutional.json"; then
             git config user.name "github-actions[bot]"
             git config user.email "github-actions[bot]@users.noreply.github.com"
             git add portfolio_breakout_institutional.json
