@@ -16,14 +16,46 @@ class BreakoutInstitutionalConfig:
     min_score: float = 0.0
 
 
+@dataclass
+class Alert:
+    """
+    每日收盤後的「持股風險警示」訊號。
+
+    被使用的欄位：
+    - symbol, name：在 Discord 文案裡顯示標的
+    - reasons：一個文字列表，描述風險原因
+    """
+    symbol: str
+    name: str
+    breakout_low: float
+    reasons: List[str]
+
+
+@dataclass
+class ExitSignal:
+    """
+    每日收盤後的「出場」訊號。
+
+    被使用的欄位：
+    - symbol, name：在 Discord 文案裡顯示標的
+    - price：建議出場價
+    - reason：文字說明
+    """
+    symbol: str
+    name: str
+    price: float
+    reason: str
+
+
 class BreakoutInstitutionalStrategy:
     """
     示意版的 Breakout + 投信策略骨架。
 
-    目前僅實作「產業白名單」的串接，其他條件可視需求再加入：
-    - 近 3 月營收 YoY > 0
-    - 投信連買 / 持股比例
-    - 技術面（多頭排列 + 橫盤突破）
+    目前實作內容：
+    - weekly 選股：依主流產業 + 分數做挑選
+    - daily_after_close：提供 detect_negative_alerts / detect_exit_signals 的介面（暫時回傳 None）
+
+    之後若你要補上實際的風險／出場條件，只要修改這兩個方法的內部邏輯即可。
     """
 
     def __init__(
@@ -35,6 +67,8 @@ class BreakoutInstitutionalStrategy:
             set(leading_industries) if leading_industries is not None else None
         )
         self.config = config or BreakoutInstitutionalConfig()
+
+    # ====== 給 weekly_recommendation 用的選股邏輯 ======
 
     def _filter_by_leading_industries(self, universe: pd.DataFrame) -> pd.DataFrame:
         if not self.leading_industries:
@@ -80,3 +114,41 @@ class BreakoutInstitutionalStrategy:
             )
 
         return selected.reset_index(drop=True)
+
+    # ====== 給 daily_after_close 用的介面（暫時空實作）======
+
+    def detect_negative_alerts(
+        self,
+        symbol: str,
+        name: str,
+        breakout_low: float,
+    ) -> Optional[Alert]:
+        """
+        檢查持股是否出現風險警示。
+
+        現階段先回傳 None（不發任何警示），
+        若你之後要加上真實邏輯，可以在這裡查價、比對停損線等，
+        並在條件觸發時回傳 Alert(...)。
+        """
+        # TODO: 之後可根據當日收盤價 / 指標 判斷是否產生風險警示
+        return None
+
+    def detect_exit_signals(
+        self,
+        symbol: str,
+        name: str,
+        breakout_low: float,
+        entry_avg_price: float,
+    ) -> Optional[ExitSignal]:
+        """
+        檢查是否出現出場訊號。
+
+        現階段先回傳 None（不發任何出場通知），
+        未來你可以依照：
+        - 達到停利目標
+        - 跌破停損價
+        - 其他技術/籌碼條件
+        來決定何時回傳 ExitSignal(...)。
+        """
+        # TODO: 之後可根據當日收盤價 / 報酬率 判斷是否出場
+        return None
