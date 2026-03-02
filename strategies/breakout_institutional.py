@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import List, Dict, Optional, Tuple
+from typing import List, Optional
 
 import numpy as np
 import pandas as pd
@@ -81,14 +81,17 @@ class BreakoutInstitutionalStrategy:
         # 2) 投信持股比例過高（這裡做示意，實際要用持股比例欄位）
         # 若有持股比例欄位 (holding_shares_ratio)，可改用該欄
         if "Investment_Trust" in inst.columns:
-            pass  # 留給你之後補充
+            # 留給你之後補充
+            pass
 
         # 3) 高檔融資暴增
         if not margin.empty:
             m_recent = margin.tail(5)
             base = m_recent["MarginPurchaseBalance"].iloc[0]
             if base > 0:
-                change_pct = (m_recent["MarginPurchaseBalance"].iloc[-1] - base) / base * 100
+                change_pct = (
+                    m_recent["MarginPurchaseBalance"].iloc[-1] - base
+                ) / base * 100
                 if change_pct > 20:
                     reasons.append("高檔融資餘額近幾日大幅增加 (>20%)")
 
@@ -121,9 +124,9 @@ class BreakoutInstitutionalStrategy:
             return Alert(symbol=symbol, name=name, reasons=reasons)
         return None
 
-    # === 進出場訊號（示意：這裡先給簡化版試單進場 & 出場） ===
+    # === 進出場訊號（目前先留空，之後補突破/回測加碼） ===
     def detect_entry_signals(self) -> List[EntrySignal]:
-        # 真正實作時需有「標的池」，這裡先留空給你後續擴充
+        # TODO: 真正實作時需有「標的池」
         return []
 
     def detect_exit_signals(
