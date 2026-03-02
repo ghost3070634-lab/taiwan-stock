@@ -1,6 +1,5 @@
 import os
 from datetime import datetime, timedelta
-from typing import List
 
 import pandas as pd
 from FinMind.data import DataLoader
@@ -38,7 +37,9 @@ class FinMindClient:
         return df.tail(months).reset_index(drop=True)
 
     def get_stock_institutional_investors(
-        self, stock_id: str, days: int = 30
+        self,
+        stock_id: str,
+        days: int = 30,
     ) -> pd.DataFrame:
         end = datetime.today().date()
         start = end - timedelta(days=days * 2)
