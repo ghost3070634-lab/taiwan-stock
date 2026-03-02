@@ -10,12 +10,6 @@ from config import INDUSTRY_CONFIG
 from data.universe import load_stock_universe, pick_top_industries
 from strategies.breakout_institutional import BreakoutInstitutionalStrategy
 
-try:
-    # 若已在 main.py 中設定過 DISCORD_URL，可以直接沿用
-    from main import DISCORD_URL as DEFAULT_DISCORD_URL
-except Exception:  # pragma: no cover - 在沒有 main.py 時僅作為後備
-    DEFAULT_DISCORD_URL = ""
-
 
 def build_weekly_recommendation(target_date: str) -> Dict[str, pd.DataFrame]:
     """
@@ -94,22 +88,28 @@ def _format_discord_embed(
 
 def send_weekly_recommendation_to_discord(
     target_date: str,
-    webhook_url: str | None = None,
+    webhook_url: str,
 ) -> None:
     """
     將本週主流產業與推薦清單以 embed 形式推送到 Discord。
+
+    注意：webhook_url 必須由外部（環境變數 / 呼叫端）提供，
+    不要在程式碼裡寫死，避免洩漏到公開 repo。
     """
-    webhook = webhook_url or DEFAULT_DISCORD_URL
-    if not webhook:
-        raise RuntimeError("未提供 Discord Webhook URL，請在環境中設定或傳入 webhook_url。")
+    if not webhook_url:
+        raise ValueError("webhook_url is required")
 
     result = build_weekly_recommendation(target_date)
     embed = _format_discord_embed(target_date, result["industries"], result["picks"])
 
     payload = {"embeds": [embed]}
-    requests.post(webhook, json=payload, timeout=10)
+    requests.post(webhook_url, json=payload, timeout=10)
 
 
 if __name__ == "__main__":
     today_str = date.today().strftime("%Y-%m-%d")
-    send_weekly_recommendation_to_discord(today_str)
+    # 本地測試可以這樣：
+    #   import os
+    #   url = os.environ["DISCORD_WEEKLY_WEBHOOK"]
+    #   send_weekly_recommendation_to_discord(today_str, webhook_url=url)
+    raise SystemExit("請在其他腳本或 CI 中傳入 webhook_url 後呼叫。")
