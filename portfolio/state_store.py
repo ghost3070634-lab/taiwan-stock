@@ -45,7 +45,7 @@ def load_state() -> PortfolioState:
     if not STATE_FILE.exists():
         return PortfolioState()
     data = json.loads(STATE_FILE.read_text(encoding="utf-8"))
-    positions = {}
+    positions: Dict[str, Position] = {}
     for sym, v in data.get("positions", {}).items():
         pos = Position(
             symbol=v["symbol"],
@@ -61,12 +61,12 @@ def load_state() -> PortfolioState:
 
 def save_state(state: PortfolioState):
     data = {
-        "positions": {
-            sym: asdict(pos)
-            for sym, pos in state.positions.items()
-        }
+        "positions": {sym: asdict(pos) for sym, pos in state.positions.items()}
     }
-    STATE_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    STATE_FILE.write_text(
+        json.dumps(data, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
 
 
 def record_entry(
