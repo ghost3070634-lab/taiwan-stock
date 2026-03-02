@@ -1,4 +1,4 @@
-
+name: Daily Trading Job
 
 on:
   schedule:
