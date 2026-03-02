@@ -1,1 +1,31 @@
+name: Weekly Strategy Recommendation
 
+on:
+  schedule:
+    # 週五 08:40 UTC ≈ 週五 16:40 台北
+    - cron: "40 8 * * 5"
+  workflow_dispatch:
+
+jobs:
+  weekly:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+
+      - name: Run weekly job
+        env:
+          FINMIND_API_TOKEN: ${{ secrets.FINMIND_API_TOKEN }}
+          DISCORD_WEEKLY_WEBHOOK: ${{ secrets.DISCORD_WEEKLY_WEBHOOK }}
+          DISCORD_POSITION_WEBHOOK: ${{ secrets.DISCORD_POSITION_WEBHOOK }}
+          DISCORD_EXIT_WEBHOOK: ${{ secrets.DISCORD_EXIT_WEBHOOK }}
+        run: |
+          python jobs/weekly_recommendation.py
