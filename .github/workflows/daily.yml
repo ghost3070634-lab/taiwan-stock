@@ -31,7 +31,7 @@ jobs:
           DISCORD_POSITION_WEBHOOK: ${{ secrets.DISCORD_POSITION_WEBHOOK }}
           DISCORD_EXIT_WEBHOOK: ${{ secrets.DISCORD_EXIT_WEBHOOK }}
         run: |
-          python jobs/daily_after_close.py
+          python -m jobs.daily_after_close
 
       - name: Commit portfolio state if changed
         run: |
