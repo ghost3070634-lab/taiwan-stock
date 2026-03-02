@@ -1,13 +1,13 @@
-name: Weekly Strategy Recommendation
+name: Weekly Industry Report
 
 on:
   schedule:
-    # 週五 08:40 UTC ≈ 週五 16:40 台北
-    - cron: "40 8 * * 5"
+    # 每週一 01:00 UTC ≈ 台北時間週一 09:00
+    - cron: "0 1 * * 1"
   workflow_dispatch:
 
 jobs:
-  weekly:
+  weekly_report:
     runs-on: ubuntu-latest
 
     steps:
@@ -22,11 +22,17 @@ jobs:
         run: |
           pip install -r requirements.txt
 
-      - name: Run weekly job
+      - name: Send weekly industry recommendation
         env:
           FINMIND_API_TOKEN: ${{ secrets.FINMIND_API_TOKEN }}
           DISCORD_WEEKLY_WEBHOOK: ${{ secrets.DISCORD_WEEKLY_WEBHOOK }}
-          DISCORD_POSITION_WEBHOOK: ${{ secrets.DISCORD_POSITION_WEBHOOK }}
-          DISCORD_EXIT_WEBHOOK: ${{ secrets.DISCORD_EXIT_WEBHOOK }}
         run: |
-          python -m jobs.weekly_recommendation
+          python - << 'PY'
+          import os
+          from datetime import date
+          from jobs.weekly_recommendation import send_weekly_recommendation_to_discord
+
+          d = date.today().strftime("%Y-%m-%d")
+          url = os.environ["DISCORD_WEEKLY_WEBHOOK"]
+          send_weekly_recommendation_to_discord(d, webhook_url=url)
+          PY
