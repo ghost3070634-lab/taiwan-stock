@@ -13,7 +13,7 @@ def main():
 
     today = datetime.today().date().isoformat()
 
-    # 1) 檢查持股風險警示
+    # 1) 檢查持股風險警示（進場追蹤）
     for sym, pos in state.positions.items():
         if pos.closed:
             continue
@@ -23,9 +23,18 @@ def main():
             breakout_low=pos.breakout_low,
         )
         if alert:
+            # 進場追蹤頻道：列出所有警訊
             dc.send("position", format_alert(alert))
 
-    # 2) 檢查出場訊號
+            # 若同一天累積 >= 2 個警訊，再額外在 exit 頻道推一次「警示」，不出場
+            if len(alert.reasons) >= 2:
+                warn_msg = (
+                    f"【警示】{alert.symbol} {alert.name}\n"
+                    f"今日累積 {len(alert.reasons)} 項警訊，建議嚴格控管部位。"
+                )
+                dc.send("exit", warn_msg)
+
+    # 2) 檢查最終出場訊號
     for sym, pos in state.positions.items():
         if pos.closed or not pos.entries:
             continue
@@ -47,6 +56,7 @@ def main():
                 reason=exit_sig.reason,
             )
             if exit_record:
+                # 出場時顯示：出場價、報酬率、原因（message_formatter 已處理「止盈/止損」文案）
                 dc.send(
                     "exit",
                     format_exit(exit_sig, exit_record.pnl_pct),
