@@ -110,8 +110,21 @@ def _fetch_daily_price_for_universe(target_date: str) -> pd.DataFrame:
             )
         )
 
-    if not frames:
-        raise RuntimeError(f"在 {target_date} 無法取得任何股價資料，請確認 FinMind API 或日期是否正確。")
+        # 修改為回溯 20 天
+    import datetime
+    current_check = datetime.datetime.strptime(target_date, "%Y-%m-%d")
+    
+    for _ in range(20):
+        price_df = api.taiwan_stock_daily(
+            stock_id=stock_id, 
+            start_date=current_check.strftime("%Y-%m-%d")
+        )
+        if not price_df.empty:
+            break
+        current_check -= datetime.timedelta(days=1)
+
+    if price_df.empty:
+        raise RuntimeError(f"嘗試回溯 20 天後仍無法取得資料，請檢查 API 狀態。")
 
     all_prices = pd.concat(frames, ignore_index=True)
     # 只保留該日期當天的最後一筆記錄（多數情況下一天只會有一筆）
