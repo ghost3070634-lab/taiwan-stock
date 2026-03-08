@@ -5,7 +5,9 @@ on:
     # 每週五12:00 UTC ≈ 台北時間週一 20:00
     - cron: "0 12 * * 5"
   workflow_dispatch:
-
+  push:                   # 新增：每次 Commit 並 Push 程式碼後觸發
+    branches:
+      - main              # 只有在 main 分支有變動時才執行
 jobs:
   weekly_report:
     runs-on: ubuntu-latest
