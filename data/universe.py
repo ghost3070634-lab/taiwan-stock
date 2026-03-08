@@ -55,42 +55,38 @@ def _fetch_daily_price_for_universe(target_date: str) -> pd.DataFrame:
     import pandas as pd
     
     api = DataLoader()
-    # 這是你 Repo 原本就有的權值股清單
     stocks = ["2330", "2317", "2603", "2412", "2882"]
-    
     curr = datetime.datetime.strptime(target_date, "%Y-%m-%d")
-    price_df = pd.DataFrame()
     
-    # 往下嘗試 20 天，直到抓到有資料的那天 (例如 03-06)
+    price_df = pd.DataFrame()
     for _ in range(20):
-        # 使用最基礎的 API，避免參數出錯
         df = api.taiwan_stock_daily(
-            stock_id="2330", 
+            stock_id=stocks,
             start_date=curr.strftime("%Y-%m-%d"),
             end_date=curr.strftime("%Y-%m-%d")
         )
         if not df.empty:
-            # 找到日期後，一口氣抓完清單內的所有股票
-            price_df = api.taiwan_stock_daily(
-                stock_id=stocks,
-                start_date=curr.strftime("%Y-%m-%d"),
-                end_date=curr.strftime("%Y-%m-%d")
-            )
+            price_df = df
             break
         curr -= datetime.timedelta(days=1)
         
     if price_df.empty:
         raise RuntimeError("回溯 20 天仍無資料")
 
-    # 針對 compute_industry_stats 所需欄位進行強制對齊
-    # 1. 確保有 turnover (成交金額)
-    if 'trading_money' in price_df.columns:
-        price_df['turnover'] = price_df['trading_money']
+    # --- 強制對齊所有可能的欄位名稱，徹底封殺 KeyError ---
+    # 處理 turnover (成交金額)
+    if 'turnover' not in price_df.columns:
+        if 'trading_money' in price_df.columns:
+            price_df['turnover'] = price_df['trading_money']
+        else:
+            # 如果連 trading_money 都沒有，就用成交張數 * 收盤價 (粗估)
+            price_df['turnover'] = price_df.get('trading_volume', 0) * price_df.get('close', 0)
     
-    # 2. 確保有 daily_return (漲跌幅)，若沒抓到就設為 0 避免 KeyError
+    # 處理 daily_return (漲跌幅)
     if 'daily_return' not in price_df.columns:
+        # 單日抓取無法計算 pct_change，直接設為 0 確保程式不崩潰
         price_df['daily_return'] = 0 
-        
+
     return price_df
 
 
