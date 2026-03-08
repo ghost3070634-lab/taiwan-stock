@@ -52,26 +52,41 @@ def load_stock_universe() -> pd.DataFrame:
 def _fetch_daily_price_for_universe(target_date: str) -> pd.DataFrame:
     from FinMind.data import DataLoader
     import datetime
+    import pandas as pd
     
     api = DataLoader()
     curr = datetime.datetime.strptime(target_date, "%Y-%m-%d")
     
-    # 自動回溯 20 天尋找最近交易日
+    # 1. 自動回溯 20 天尋找最近交易日
+    price_df = pd.DataFrame()
     for _ in range(20):
-        price_df = api.taiwan_stock_daily(
-            stock_id="2330", 
-            start_date=curr.strftime("%Y-%m-%d")
+        # 抓取全市場盤後資料
+        df = api.taiwan_stock_daily_adj(
+            start_date=curr.strftime("%Y-%m-%d"),
+            end_date=curr.strftime("%Y-%m-%d")
         )
-        if not price_df.empty:
-            return price_df
+        if not df.empty:
+            price_df = df
+            break
         curr -= datetime.timedelta(days=1)
         
-    raise RuntimeError(f"回溯 20 天仍無資料，請檢查 API。")
+    if price_df.empty:
+        raise RuntimeError("回溯 20 天仍無資料")
 
+    # 2. 補足計算產業排名所需的欄位
+    # 將成交金額改名為 turnover
+    if 'trading_money' in price_df.columns:
+        price_df['turnover'] = price_df['trading_money']
+    
+    # 計算每日漲跌幅 (daily_return)
+    if 'daily_return' not in price_df.columns:
+        # 這裡假設您的 universe 邏輯需要這個欄位來計算產業強弱
+        price_df['daily_return'] = price_df.groupby('stock_id')['close'].pct_change() * 100
+        # 若是單日資料 pct_change 會是 NaN，補 0 避免後續報錯
+        price_df['daily_return'] = price_df['daily_return'].fillna(0)
 
-    all_prices = pd.concat(frames, ignore_index=True)
-    # 只保留該日期當天的最後一筆記錄（多數情況下一天只會有一筆）
-    return all_prices.sort_values(["stock_id", "date"]).groupby("stock_id").tail(1)
+    return price_df
+
 
 
 def compute_industry_stats(target_date: str) -> pd.DataFrame:
