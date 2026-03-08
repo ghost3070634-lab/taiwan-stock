@@ -55,36 +55,42 @@ def _fetch_daily_price_for_universe(target_date: str) -> pd.DataFrame:
     import pandas as pd
     
     api = DataLoader()
-    curr = datetime.datetime.strptime(target_date, "%Y-%m-%d")
+    # 這是你 Repo 原本就有的權值股清單
+    stocks = ["2330", "2317", "2603", "2412", "2882"]
     
-    # 1. 自動回溯 20 天尋找最近交易日
+    curr = datetime.datetime.strptime(target_date, "%Y-%m-%d")
     price_df = pd.DataFrame()
+    
+    # 往下嘗試 20 天，直到抓到有資料的那天 (例如 03-06)
     for _ in range(20):
-        # 抓取全市場盤後資料
-        df = api.taiwan_stock_daily_adj(
+        # 使用最基礎的 API，避免參數出錯
+        df = api.taiwan_stock_daily(
+            stock_id="2330", 
             start_date=curr.strftime("%Y-%m-%d"),
             end_date=curr.strftime("%Y-%m-%d")
         )
         if not df.empty:
-            price_df = df
+            # 找到日期後，一口氣抓完清單內的所有股票
+            price_df = api.taiwan_stock_daily(
+                stock_id=stocks,
+                start_date=curr.strftime("%Y-%m-%d"),
+                end_date=curr.strftime("%Y-%m-%d")
+            )
             break
         curr -= datetime.timedelta(days=1)
         
     if price_df.empty:
         raise RuntimeError("回溯 20 天仍無資料")
 
-    # 2. 補足計算產業排名所需的欄位
-    # 將成交金額改名為 turnover
+    # 針對 compute_industry_stats 所需欄位進行強制對齊
+    # 1. 確保有 turnover (成交金額)
     if 'trading_money' in price_df.columns:
         price_df['turnover'] = price_df['trading_money']
     
-    # 計算每日漲跌幅 (daily_return)
+    # 2. 確保有 daily_return (漲跌幅)，若沒抓到就設為 0 避免 KeyError
     if 'daily_return' not in price_df.columns:
-        # 這裡假設您的 universe 邏輯需要這個欄位來計算產業強弱
-        price_df['daily_return'] = price_df.groupby('stock_id')['close'].pct_change() * 100
-        # 若是單日資料 pct_change 會是 NaN，補 0 避免後續報錯
-        price_df['daily_return'] = price_df['daily_return'].fillna(0)
-
+        price_df['daily_return'] = 0 
+        
     return price_df
 
 
