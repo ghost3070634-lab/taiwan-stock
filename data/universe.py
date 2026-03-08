@@ -50,81 +50,24 @@ def load_stock_universe() -> pd.DataFrame:
 
 
 def _fetch_daily_price_for_universe(target_date: str) -> pd.DataFrame:
-    """
-    使用 FinMind 取得特定日期的全市場股價資料。
-
-    為了避免對 API 發出過多請求，這裡採用「逐檔抓取 + 合併」的方式，
-    之後若要最佳化，可以改成一次抓全部再 merge。
-    """
-    try:
-        from FinMind.data import DataLoader
-    except ImportError as exc:
-        raise RuntimeError("需要安裝 FinMind 才能計算產業統計，請先在環境中安裝 FinMind。") from exc
-
-    loader = DataLoader()
-    universe = load_stock_universe()
-
-    frames: List[pd.DataFrame] = []
-    for stock_id in universe["stock_id"].unique():
-        try:
-            df = loader.taiwan_stock_daily(
-                stock_id=stock_id,
-                start_date=target_date,
-                end_date=target_date,
-            )
-        except Exception:
-            continue
-        if df.empty:
-            continue
-
-        # FinMind 欄位通常包含: date, stock_id, open, close, max, min, Trading_Volume ...
-        df = df.copy()
-        if "date" not in df.columns or "open" not in df.columns or "close" not in df.columns:
-            continue
-
-        df = df.assign(
-            target_date=df["date"],
-            stock_id=df.get("stock_id", stock_id),
-            open=df["open"].astype(float),
-            close=df["close"].astype(float),
-        )
-        if "Trading_Volume" in df.columns:
-            volume = df["Trading_Volume"].astype(float)
-        elif "volume" in df.columns:
-            volume = df["volume"].astype(float)
-        else:
-            volume = pd.Series(0.0, index=df.index)
-
-        turnover = df["close"] * volume
-        daily_return = (df["close"] - df["open"]) / df["open"].replace(0, pd.NA)
-
-        frames.append(
-            pd.DataFrame(
-                {
-                    "date": df["date"],
-                    "stock_id": df["stock_id"],
-                    "close": df["close"],
-                    "turnover": turnover,
-                    "daily_return": daily_return,
-                }
-            )
-        )
-
-        # 修改為回溯 20 天
+    from FinMind.data import DataLoader
     import datetime
-    current_check = datetime.datetime.strptime(target_date, "%Y-%m-%d")
     
+    api = DataLoader()
+    curr = datetime.datetime.strptime(target_date, "%Y-%m-%d")
+    
+    # 自動回溯 20 天尋找最近交易日
     for _ in range(20):
         price_df = api.taiwan_stock_daily(
-            stock_id=stock_id, 
-            start_date=current_check.strftime("%Y-%m-%d")
+            stock_id="2330", 
+            start_date=curr.strftime("%Y-%m-%d")
         )
         if not price_df.empty:
-            break
-        current_check -= datetime.timedelta(days=1)
+            return price_df
+        curr -= datetime.timedelta(days=1)
+        
+    raise RuntimeError(f"回溯 20 天仍無資料，請檢查 API。")
 
-    if price_df.empty:
-        raise RuntimeError(f"嘗試回溯 20 天後仍無法取得資料，請檢查 API 狀態。")
 
     all_prices = pd.concat(frames, ignore_index=True)
     # 只保留該日期當天的最後一筆記錄（多數情況下一天只會有一筆）
