@@ -2,8 +2,8 @@ name: Weekly Industry Report
 
 on:
   schedule:
-    # 每週一 01:00 UTC ≈ 台北時間週一 09:00
-    - cron: "0 1 * * 1"
+    # 每週五12:00 UTC ≈ 台北時間週一 20:00
+    - cron: "0 12 * * 5"
   workflow_dispatch:
 
 jobs:
