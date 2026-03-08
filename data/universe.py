@@ -55,15 +55,14 @@ def _fetch_daily_price_for_universe(target_date: str) -> pd.DataFrame:
     import pandas as pd
     
     api = DataLoader()
-    stocks = ["2330", "2317", "2603", "2412", "2882"]
     curr = datetime.datetime.strptime(target_date, "%Y-%m-%d")
     
+    # 1. 往前找最近的有交易的日期 (全市場)
     price_df = pd.DataFrame()
     for _ in range(20):
-        df = api.taiwan_stock_daily(
-            stock_id=stocks,
-            start_date=curr.strftime("%Y-%m-%d"),
-            end_date=curr.strftime("%Y-%m-%d")
+        # 這是抓取「當天全市場」資料最正確的 API 呼叫方式
+        df = api.taiwan_stock_daily_all(
+            date=curr.strftime("%Y-%m-%d")
         )
         if not df.empty:
             price_df = df
@@ -71,23 +70,23 @@ def _fetch_daily_price_for_universe(target_date: str) -> pd.DataFrame:
         curr -= datetime.timedelta(days=1)
         
     if price_df.empty:
-        raise RuntimeError("回溯 20 天仍無資料")
+        raise RuntimeError("回溯 20 天仍無全市場資料")
 
-    # --- 強制對齊所有可能的欄位名稱，徹底封殺 KeyError ---
-    # 處理 turnover (成交金額)
-    if 'turnover' not in price_df.columns:
-        if 'trading_money' in price_df.columns:
-            price_df['turnover'] = price_df['trading_money']
-        else:
-            # 如果連 trading_money 都沒有，就用成交張數 * 收盤價 (粗估)
-            price_df['turnover'] = price_df.get('trading_volume', 0) * price_df.get('close', 0)
+    # 2. 依照 FinMind 官方欄位定義，強制對齊你的分析邏輯
+    # FinMind 全市場 API 的成交金額欄位通常叫 'Trading_Money'
+    price_df.columns = [c.lower() for c in price_df.columns] # 先全轉小寫避免大小寫問題
     
-    # 處理 daily_return (漲跌幅)
+    if 'trading_money' in price_df.columns:
+        price_df['turnover'] = price_df['trading_money']
+    elif 'turnover' not in price_df.columns:
+        price_df['turnover'] = 0
+        
     if 'daily_return' not in price_df.columns:
-        # 單日抓取無法計算 pct_change，直接設為 0 確保程式不崩潰
-        price_df['daily_return'] = 0 
+        # 這裡改用漲跌百分比欄位 (如果有的話) 或設為 0
+        price_df['daily_return'] = price_df.get('change_rate', 0)
 
     return price_df
+
 
 
 
