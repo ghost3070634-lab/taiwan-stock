@@ -71,9 +71,8 @@ def _fetch_daily_price_for_universe(target_date: str) -> pd.DataFrame:
     payload = resp.json()
 
     data = payload.get("data")
-    if not data:
-        # 沒開盤/休市/無資料
-        return pd.DataFrame()
+if not data:
+    raise RuntimeError(f"FinMind 無資料或回應異常: {payload}")
 
     df = pd.DataFrame(data)
     if df.empty:
