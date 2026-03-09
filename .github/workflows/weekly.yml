@@ -23,18 +23,18 @@ jobs:
       - name: Install dependencies
         run: |
           pip install -r requirements.txt
-
       - name: Send weekly industry recommendation
-        env:
-          FINMIND_API_TOKEN: ${{ secrets.FINMIND_API_TOKEN }}
-          DISCORD_WEEKLY_WEBHOOK: ${{ secrets.DISCORD_WEEKLY_WEBHOOK }}
-        run: |
-          python - << 'PY'
-          import os
-          from datetime import date
-          from jobs.weekly_recommendation import send_weekly_recommendation_to_discord
+     
+      env:
+      FINMIND_API_TOKEN: ${{ secrets.FINMIND_API_TOKEN }}
+      DISCORD_WEEKLY_WEBHOOK: ${{ secrets.DISCORD_WEEKLY_WEBHOOK }}
+     run: |
+      python - << 'PY'
+      import os
+      from data.universe import get_weekly_push_target_date
+      from jobs.weekly_recommendation import send_weekly_recommendation_to_discord
 
-          d = date.today().strftime("%Y-%m-%d")
-          url = os.environ["DISCORD_WEEKLY_WEBHOOK"]
-          send_weekly_recommendation_to_discord(d, webhook_url=url)
-          PY
+       _, d = get_weekly_push_target_date()  # 週五為基準，沒資料就往前回推（最多 20 天）
+       url = os.environ["DISCORD_WEEKLY_WEBHOOK"]
+       send_weekly_recommendation_to_discord(d, webhook_url=url)
+       PY
