@@ -53,10 +53,6 @@ def load_stock_universe() -> pd.DataFrame:
 
 
 def _fetch_daily_price_for_universe(target_date: str) -> pd.DataFrame:
-    """
-    抓「全市場」(全部台股) 指定日期的日資料（調整後股價）。
-    若該日休市/無資料，回傳空 DataFrame 讓上層決定是否回推日期。
-    """
     token = os.getenv("FINMIND_API_TOKEN", "")
     params = {
         "dataset": "TaiwanStockPriceAdj",
@@ -66,32 +62,27 @@ def _fetch_daily_price_for_universe(target_date: str) -> pd.DataFrame:
     if token:
         params["token"] = token
 
-    resp = requests.get("https://api.finmindtrade.com/api/v4/data", params=params, timeout=30)
+    resp = requests.get(
+        "https://api.finmindtrade.com/api/v4/data",
+        params=params,
+        timeout=30,
+    )
     resp.raise_for_status()
     payload = resp.json()
 
     data = payload.get("data")
-if not data:
-    raise RuntimeError(f"FinMind 無資料或回應異常: {payload}")
+    if not data:
+        # 先不要 return 空，直接噴出 payload 讓我們知道原因
+        raise RuntimeError(f"FinMind 無資料或回應異常: {payload}")
 
     df = pd.DataFrame(data)
     if df.empty:
-        return df
+        raise RuntimeError(f"FinMind data 為空: {payload}")
 
-    # 欄位標準化（不同資料集/版本欄位可能大小寫不同）
     df.columns = [c.lower() for c in df.columns]
-
-    # stock_id 欄位可能 叫 stock_id 或 data_id
     if "stock_id" not in df.columns and "data_id" in df.columns:
         df["stock_id"] = df["data_id"]
 
-    required = {"date", "stock_id"}
-    if not required.issubset(df.columns):
-        # 欄位不足就視為無可用資料
-        return pd.DataFrame()
-
-    # 取 open/close/volume
-    # volume 常見欄位：trading_volume / volume
     if "trading_volume" in df.columns:
         volume = pd.to_numeric(df["trading_volume"], errors="coerce").fillna(0.0)
     elif "volume" in df.columns:
@@ -102,7 +93,6 @@ if not data:
     open_ = pd.to_numeric(df.get("open"), errors="coerce")
     close = pd.to_numeric(df.get("close"), errors="coerce")
 
-    # turnover：優先用 trading_money，否則用 close * volume
     if "trading_money" in df.columns:
         turnover = pd.to_numeric(df["trading_money"], errors="coerce").fillna(0.0)
     else:
@@ -120,11 +110,12 @@ if not data:
         }
     ).dropna(subset=["stock_id", "date"])
 
-    # 同一日同一股票若有重複列，保留最後一筆
-    return out.sort_values(["stock_id", "date"]).groupby("stock_id").tail(1).reset_index(drop=True)
-
-from datetime import datetime, timedelta, date as date_type
-
+    return (
+        out.sort_values(["stock_id", "date"])
+        .groupby("stock_id")
+        .tail(1)
+        .reset_index(drop=True)
+    )
 def _taipei_today() -> date_type:
     """以台灣時區取得今天日期。"""
     try:
