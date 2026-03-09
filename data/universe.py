@@ -125,10 +125,6 @@ def _taipei_today() -> date_type:
         return date_type.today()
 
 def find_nearest_trading_date_with_data(start_date: date_type, max_days_back: int = 20) -> Tuple[date_type, str]:
-    """
-    從 start_date 開始往前找，直到找到有資料的交易日為止（最多回推 max_days_back 天）。
-    判斷方式：_fetch_daily_price_for_universe(date) 回傳非空 DataFrame。
-    """
     for i in range(max_days_back):
         d = start_date - timedelta(days=i)
         ds = d.strftime("%Y-%m-%d")
@@ -136,8 +132,9 @@ def find_nearest_trading_date_with_data(start_date: date_type, max_days_back: in
             df = _fetch_daily_price_for_universe(ds)
             if df is not None and not df.empty:
                 return d, ds
-        except Exception:
-            # 任何錯誤都視為該日不可用，繼續回推
+        except Exception as e:
+            # ✅ 把真正的錯誤訊息印出來！
+            print(f"[{ds}] 抓取失敗，原因: {e}")
             continue
     raise RuntimeError(f"回推 {max_days_back} 天仍找不到有資料的交易日")
 
