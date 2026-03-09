@@ -53,90 +53,80 @@ def load_stock_universe() -> pd.DataFrame:
 
 
 def _fetch_daily_price_for_universe(target_date: str) -> pd.DataFrame:
-    token = os.getenv("FINMIND_API_TOKEN", "")
-    params = {
-        "dataset": "TaiwanStockPriceAdj",
-        "start_date": target_date,
-        "end_date": target_date,
-    }
-    if token:
-        params["token"] = token
-
-    resp = requests.get(
-        "https://api.finmindtrade.com/api/v4/data",
-        params=params,
-        timeout=30,
-    )
-    resp.raise_for_status()
-    payload = resp.json()
-
-    data = payload.get("data")
-    if not data:
-        # 先不要 return 空，直接噴出 payload 讓我們知道原因
-        raise RuntimeError(f"FinMind 無資料或回應異常: {payload}")
-
-    df = pd.DataFrame(data)
-    if df.empty:
-        raise RuntimeError(f"FinMind data 為空: {payload}")
-
-    df.columns = [c.lower() for c in df.columns]
-    if "stock_id" not in df.columns and "data_id" in df.columns:
-        df["stock_id"] = df["data_id"]
-
-    if "trading_volume" in df.columns:
-        volume = pd.to_numeric(df["trading_volume"], errors="coerce").fillna(0.0)
-    elif "volume" in df.columns:
-        volume = pd.to_numeric(df["volume"], errors="coerce").fillna(0.0)
-    else:
-        volume = pd.Series(0.0, index=df.index)
-
-    open_ = pd.to_numeric(df.get("open"), errors="coerce")
-    close = pd.to_numeric(df.get("close"), errors="coerce")
-
-    if "trading_money" in df.columns:
-        turnover = pd.to_numeric(df["trading_money"], errors="coerce").fillna(0.0)
-    else:
-        turnover = (close.fillna(0.0) * volume).fillna(0.0)
-
-    daily_return = (close - open_) / open_.replace(0, pd.NA)
-
-    out = pd.DataFrame(
-        {
-            "date": df["date"],
-            "stock_id": df["stock_id"].astype(str),
-            "close": close,
-            "turnover": turnover,
-            "daily_return": daily_return,
-        }
-    ).dropna(subset=["stock_id", "date"])
-
-    return (
-        out.sort_values(["stock_id", "date"])
-        .groupby("stock_id")
-        .tail(1)
-        .reset_index(drop=True)
-    )
-def _taipei_today() -> date_type:
-    """以台灣時區取得今天日期。"""
+    """
+    使用政府 OpenAPI 獲取全市場「最新一個交易日」的資料。
+    包含上市 (TWSE) 與 上櫃 (TPEx)。
+    """
+    print(f"[{target_date}] 準備透過 OpenAPI 抓取全市場最新報價...")
+    
+    # 1. 抓取上市股票 (TWSE)
     try:
-        from zoneinfo import ZoneInfo
-        return datetime.now(ZoneInfo("Asia/Taipei")).date()
-    except Exception:
-        return date_type.today()
+        twse_url = "https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL"
+        resp_twse = requests.get(twse_url, timeout=15)
+        resp_twse.raise_for_status()
+        df_twse = pd.DataFrame(resp_twse.json())
+        # 映射上市 OpenAPI 的欄位名稱
+        df_twse = df_twse.rename(columns={
+            "Code": "stock_id",
+            "OpeningPrice": "open",
+            "ClosingPrice": "close",
+            "TradeValue": "turnover"
+        })
+    except Exception as e:
+        print(f"上市資料抓取失敗: {e}")
+        df_twse = pd.DataFrame()
+
+    # 2. 抓取上櫃股票 (TPEx)
+    try:
+        tpex_url = "https://www.tpex.org.tw/openapi/v1/tpex_mainboard_quotes"
+        resp_tpex = requests.get(tpex_url, timeout=15)
+        resp_tpex.raise_for_status()
+        df_tpex = pd.DataFrame(resp_tpex.json())
+        # 映射上櫃 OpenAPI 的欄位名稱
+        df_tpex = df_tpex.rename(columns={
+            "SecuritiesCompanyCode": "stock_id",
+            "Open": "open",
+            "Close": "close",
+            "TradingAmount": "turnover"
+        })
+    except Exception as e:
+        print(f"上櫃資料抓取失敗: {e}")
+        df_tpex = pd.DataFrame()
+
+    # 3. 合併上市與上櫃資料
+    df_all = pd.concat([df_twse, df_tpex], ignore_index=True)
+    
+    if df_all.empty:
+        raise RuntimeError("無法從政府 OpenAPI 獲取任何報價資料！")
+
+    # 4. 資料清理與型別轉換
+    df_all["stock_id"] = df_all["stock_id"].astype(str)
+    
+    # 轉為數值 (遇到 '--' 或空字串會強制轉為 NaN)
+    df_all["open"] = pd.to_numeric(df_all["open"], errors="coerce")
+    df_all["close"] = pd.to_numeric(df_all["close"], errors="coerce")
+    df_all["turnover"] = pd.to_numeric(df_all["turnover"], errors="coerce").fillna(0.0)
+
+    # 計算單日漲跌幅: (收盤 - 開盤) / 開盤
+    df_all["daily_return"] = (df_all["close"] - df_all["open"]) / df_all["open"].replace(0, pd.NA)
+
+    # 標記日期 (OpenAPI 不帶具體日期欄位，以 target_date 作為輸出標記)
+    df_all["date"] = target_date
+
+    # 挑出需要的欄位並過濾掉沒有收盤價的無效資料
+    out = df_all[["date", "stock_id", "close", "turnover", "daily_return"]].dropna(subset=["stock_id", "close"])
+
+    print(f"✅ 成功獲取 {len(out)} 檔股票的最新資料！")
+    return out.reset_index(drop=True)
+
 
 def find_nearest_trading_date_with_data(start_date: date_type, max_days_back: int = 20) -> Tuple[date_type, str]:
-    for i in range(max_days_back):
-        d = start_date - timedelta(days=i)
-        ds = d.strftime("%Y-%m-%d")
-        try:
-            df = _fetch_daily_price_for_universe(ds)
-            if df is not None and not df.empty:
-                return d, ds
-        except Exception as e:
-            # ✅ 把真正的錯誤訊息印出來！
-            print(f"[{ds}] 抓取失敗，原因: {e}")
-            continue
-    raise RuntimeError(f"回推 {max_days_back} 天仍找不到有資料的交易日")
+    """
+    因為 OpenAPI 永遠會提供「最新一個交易日」的全市場資料。
+    所以不需要再浪費時間往前遞迴測試，直接回傳預期的計算基準日即可。
+    """
+    ds = start_date.strftime("%Y-%m-%d")
+    return start_date, ds
 
 def get_weekly_push_target_date() -> Tuple[date_type, str]:
     """
