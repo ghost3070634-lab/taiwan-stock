@@ -1,3 +1,5 @@
+import os
+import requests
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -50,50 +52,76 @@ def load_stock_universe() -> pd.DataFrame:
 
 
 def _fetch_daily_price_for_universe(target_date: str) -> pd.DataFrame:
-    from FinMind.data import DataLoader
-    import datetime
-    import pandas as pd
-    
-    api = DataLoader()
-    # 這裡必須給它一個清單，否則 API 會報錯。我從你原本的產業分類邏輯中抓取。
-    curr = datetime.datetime.strptime(target_date, "%Y-%m-%d")
-    
-    price_df = pd.DataFrame()
-    for _ in range(20):
-        # 使用你原本就會動的 API，但一次抓多點股票確保產業分析有數據
-        # 這裡建議先用幾隻權值股當「日期探測器」
-        date_str = curr.strftime("%Y-%m-%d")
-        try:
-    df = api.taiwan_stock_daily_adj(
-        stock_id="2330",
-        start_date=date_str,
-        end_date=date_str,
-    )
-except KeyError:
-    df = pd.DataFrame()
-        if not df.empty:
-            # 找到有開盤的日期後，直接抓取當天所有資料
-            # 註：FinMind 的 daily_adj 若不給 id 有些版本會報錯，
-            # 這裡我們維持回傳這張 df 並確保欄位對齊
-            price_df = df
-            break
-        curr -= datetime.timedelta(days=1)
-        
-    if price_df.empty:
-        raise RuntimeError("回溯 20 天仍無資料")
+    """
+    抓「全市場」(全部台股) 指定日期的日資料（調整後股價）。
+    若該日休市/無資料，回傳空 DataFrame 讓上層決定是否回推日期。
+    """
+    token = os.getenv("FINMIND_API_TOKEN", "")
+    params = {
+        "dataset": "TaiwanStockPriceAdj",
+        "start_date": target_date,
+        "end_date": target_date,
+    }
+    if token:
+        params["token"] = token
 
-    # 暴力修正欄位，確保 compute_industry_stats 不會噴 KeyError
-    price_df.columns = [c.lower() for c in price_df.columns]
-    
-    if 'turnover' not in price_df.columns:
-        # 嘗試從 trading_money 或計算得出
-        price_df['turnover'] = price_df.get('trading_money', 0)
-        
-    if 'daily_return' not in price_df.columns:
-        price_df['daily_return'] = 0
+    resp = requests.get("https://api.finmindtrade.com/api/v4/data", params=params, timeout=30)
+    resp.raise_for_status()
+    payload = resp.json()
 
-    return price_df
+    data = payload.get("data")
+    if not data:
+        # 沒開盤/休市/無資料
+        return pd.DataFrame()
 
+    df = pd.DataFrame(data)
+    if df.empty:
+        return df
+
+    # 欄位標準化（不同資料集/版本欄位可能大小寫不同）
+    df.columns = [c.lower() for c in df.columns]
+
+    # stock_id 欄位可能 叫 stock_id 或 data_id
+    if "stock_id" not in df.columns and "data_id" in df.columns:
+        df["stock_id"] = df["data_id"]
+
+    required = {"date", "stock_id"}
+    if not required.issubset(df.columns):
+        # 欄位不足就視為無可用資料
+        return pd.DataFrame()
+
+    # 取 open/close/volume
+    # volume 常見欄位：trading_volume / volume
+    if "trading_volume" in df.columns:
+        volume = pd.to_numeric(df["trading_volume"], errors="coerce").fillna(0.0)
+    elif "volume" in df.columns:
+        volume = pd.to_numeric(df["volume"], errors="coerce").fillna(0.0)
+    else:
+        volume = pd.Series(0.0, index=df.index)
+
+    open_ = pd.to_numeric(df.get("open"), errors="coerce")
+    close = pd.to_numeric(df.get("close"), errors="coerce")
+
+    # turnover：優先用 trading_money，否則用 close * volume
+    if "trading_money" in df.columns:
+        turnover = pd.to_numeric(df["trading_money"], errors="coerce").fillna(0.0)
+    else:
+        turnover = (close.fillna(0.0) * volume).fillna(0.0)
+
+    daily_return = (close - open_) / open_.replace(0, pd.NA)
+
+    out = pd.DataFrame(
+        {
+            "date": df["date"],
+            "stock_id": df["stock_id"].astype(str),
+            "close": close,
+            "turnover": turnover,
+            "daily_return": daily_return,
+        }
+    ).dropna(subset=["stock_id", "date"])
+
+    # 同一日同一股票若有重複列，保留最後一筆
+    return out.sort_values(["stock_id", "date"]).groupby("stock_id").tail(1).reset_index(drop=True)
 
 
 
