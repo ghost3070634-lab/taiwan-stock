@@ -124,7 +124,44 @@ def _fetch_daily_price_for_universe(target_date: str) -> pd.DataFrame:
     # 同一日同一股票若有重複列，保留最後一筆
     return out.sort_values(["stock_id", "date"]).groupby("stock_id").tail(1).reset_index(drop=True)
 
+from datetime import datetime, timedelta, date as date_type
 
+def _taipei_today() -> date_type:
+    """以台灣時區取得今天日期。"""
+    try:
+        from zoneinfo import ZoneInfo
+        return datetime.now(ZoneInfo("Asia/Taipei")).date()
+    except Exception:
+        return date_type.today()
+
+def find_nearest_trading_date_with_data(start_date: date_type, max_days_back: int = 20) -> Tuple[date_type, str]:
+    """
+    從 start_date 開始往前找，直到找到有資料的交易日為止（最多回推 max_days_back 天）。
+    判斷方式：_fetch_daily_price_for_universe(date) 回傳非空 DataFrame。
+    """
+    for i in range(max_days_back):
+        d = start_date - timedelta(days=i)
+        ds = d.strftime("%Y-%m-%d")
+        try:
+            df = _fetch_daily_price_for_universe(ds)
+            if df is not None and not df.empty:
+                return d, ds
+        except Exception:
+            # 任何錯誤都視為該日不可用，繼續回推
+            continue
+    raise RuntimeError(f"回推 {max_days_back} 天仍找不到有資料的交易日")
+
+def get_weekly_push_target_date() -> Tuple[date_type, str]:
+    """
+    週報推波日期：
+    - 以台灣時間的「最近一個週五」為基準
+    - 若週五無資料，就找週四、週三…最多回推 20 天
+    """
+    today = _taipei_today()
+    # Monday=0 ... Friday=4
+    days_since_friday = (today.weekday() - 4) % 7
+    base_friday = today if days_since_friday == 0 else today - timedelta(days=days_since_friday)
+    return find_nearest_trading_date_with_data(base_friday, max_days_back=20)
 
 def compute_industry_stats(target_date: str) -> pd.DataFrame:
     """
