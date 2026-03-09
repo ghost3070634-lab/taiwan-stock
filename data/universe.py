@@ -127,66 +127,16 @@ def _taipei_today() -> date_type:
     except Exception:
         return date_type.today()
 
-
-def find_nearest_trading_date_with_data(start_date: date_type, max_days_back: int = 20) -> Tuple[date_type, str]:
+def compute_industry_stats(target_date: str, price_df: pd.DataFrame) -> pd.DataFrame:
     """
-    因為 OpenAPI 永遠會提供「最新一個交易日」的全市場資料。
-    所以不需要再浪費時間往前遞迴測試，直接回傳預期的計算基準日即可。
-    """
-    ds = start_date.strftime("%Y-%m-%d")
-    return start_date, ds
-
-
-def get_weekly_push_target_date() -> Tuple[date_type, str]:
-    """
-    週報推波日期：
-    - 以台灣時間的「最近一個週五」為基準
-    """
-    today = _taipei_today()
-    # Monday=0 ... Friday=4
-    days_since_friday = (today.weekday() - 4) % 7
-    base_friday = today if days_since_friday == 0 else today - timedelta(days=days_since_friday)
-    
-    # 直接使用 OpenAPI 邏輯，回傳基準日
-    return find_nearest_trading_date_with_data(base_friday, max_days_back=20)
-
-def find_nearest_trading_date_with_data(start_date: date_type, max_days_back: int = 20) -> Tuple[date_type, str]:
-    """
-    因為 OpenAPI 永遠會提供「最新一個交易日」的全市場資料。
-    所以不需要再浪費時間往前遞迴測試，直接回傳預期的計算基準日即可。
-    """
-    ds = start_date.strftime("%Y-%m-%d")
-    return start_date, ds
-
-def get_weekly_push_target_date() -> Tuple[date_type, str]:
-    """
-    週報推波日期：
-    - 以台灣時間的「最近一個週五」為基準
-    - 若週五無資料，就找週四、週三…最多回推 20 天
-    """
-    today = _taipei_today()
-    # Monday=0 ... Friday=4
-    days_since_friday = (today.weekday() - 4) % 7
-    base_friday = today if days_since_friday == 0 else today - timedelta(days=days_since_friday)
-    return find_nearest_trading_date_with_data(base_friday, max_days_back=20)
-
-def compute_industry_stats(target_date: str) -> pd.DataFrame:
-    """
-    計算每個產業在指定日期的統計資訊：
-    - 總成交金額 (total_turnover)
-    - 平均漲跌幅 (avg_return)
-    - 在「當日漲幅前 N 名」中出現的檔數 (leading_stock_count_in_top20)
+    修改點：增加 price_df 參數，移除函式內的 _fetch 呼叫
     """
     universe = load_stock_universe()
-    price_df = _fetch_daily_price_for_universe(target_date)
-
+    # 直接使用傳入的 price_df
     merged = price_df.merge(universe, on="stock_id", how="left")
     merged = merged.dropna(subset=["industry"])
-
-    if merged.empty:
-        raise RuntimeError("股價資料與產業對應後為空，請確認 stock_universe 內容是否正確。")
-
-    # 計算每個產業的基礎統計
+    
+    # --- 關鍵修正：你必須先把基礎統計做出來，後面的 score 計算才拿得到 stats 變數 ---
     grouped = merged.groupby("industry", as_index=False)
     stats = grouped.agg(
         total_turnover=("turnover", "sum"),
@@ -196,7 +146,7 @@ def compute_industry_stats(target_date: str) -> pd.DataFrame:
 
     # 計算「當日漲幅前 N 名」中的領漲檔數
     rank_n = INDUSTRY_CONFIG.leading_rank_window
-    top_n = (
+    top_n_data = (
         merged.sort_values("daily_return", ascending=False)
         .head(rank_n)
         .groupby("industry")["stock_id"]
@@ -205,11 +155,11 @@ def compute_industry_stats(target_date: str) -> pd.DataFrame:
         .reset_index()
     )
 
-    stats = stats.merge(top_n, on="industry", how="left").fillna(
+    stats = stats.merge(top_n_data, on="industry", how="left").fillna(
         {"leading_stock_count_in_top20": 0}
     )
+    # ------------------------------------------------------------------
 
-    # 根據三個指標計算綜合分數（皆轉成 0~1 的排名分數後加總）
     def _rank_normalize(series: pd.Series, ascending: bool) -> pd.Series:
         if series.nunique() <= 1:
             return pd.Series(0.5, index=series.index)
@@ -227,31 +177,42 @@ def compute_industry_stats(target_date: str) -> pd.DataFrame:
     return stats.sort_values("score", ascending=False).reset_index(drop=True)
 
 
+# ... (前面的 Import 和 IndustryStat 保持不變) ...
+
 def pick_top_industries(
     target_date: str,
     top_n: Optional[int] = None,
-) -> Tuple[List[str], pd.DataFrame]:
-    """
-    綜合產業統計指標後挑出主流產業清單。
-
-    回傳:
-    - leading_industries: 依照 score 排序後的前 N 名產業名稱清單
-    - stats: 含有所有產業統計與分數的 DataFrame（已依 score 由高到低排序）
-    """
+) -> Tuple[List[str], pd.DataFrame, pd.DataFrame]:
     if top_n is None:
         top_n = INDUSTRY_CONFIG.top_industry_count
 
-    stats = compute_industry_stats(target_date)
+    # 1. 抓取全市場資料 (這是唯一一次 API 請求)
+    price_df = _fetch_daily_price_for_universe(target_date)
+    
+    # 2. 修正：將 price_df 傳入
+    stats = compute_industry_stats(target_date, price_df) 
 
-    # 先依最小領漲檔數門檻過濾，再取前 N 名
+    # 3. 過濾強勢產業 ... (以下不變)
     filtered = stats[
         stats["leading_stock_count_in_top20"]
         >= INDUSTRY_CONFIG.min_leading_stock_count_in_top20
     ]
     if filtered.empty:
-        # 若嚴格條件下沒有任何產業通過，則退而求其次：直接取分數最高的前 N 名
         filtered = stats
 
     top = filtered.head(top_n)
     industries = top["industry"].tolist()
-    return industries, stats
+    
+    return industries, stats, price_df
+
+
+def find_nearest_trading_date_with_data(start_date: date_type, max_days_back: int = 20) -> Tuple[date_type, str]:
+    ds = start_date.strftime("%Y-%m-%d")
+    return start_date, ds
+
+def get_weekly_push_target_date() -> Tuple[date_type, str]:
+    today = _taipei_today()
+    days_since_friday = (today.weekday() - 4) % 7
+    base_friday = today if days_since_friday == 0 else today - timedelta(days=days_since_friday)
+    return find_nearest_trading_date_with_data(base_friday, max_days_back=20)
+   
