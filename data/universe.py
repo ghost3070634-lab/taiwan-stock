@@ -63,11 +63,14 @@ def _fetch_daily_price_for_universe(target_date: str) -> pd.DataFrame:
         # 使用你原本就會動的 API，但一次抓多點股票確保產業分析有數據
         # 這裡建議先用幾隻權值股當「日期探測器」
         date_str = curr.strftime("%Y-%m-%d")
-        df = api.taiwan_stock_daily_adj(
-            stock_id="2330", 
-            start_date=date_str,
-            end_date=date_str
-        )
+        try:
+    df = api.taiwan_stock_daily_adj(
+        stock_id="2330",
+        start_date=date_str,
+        end_date=date_str,
+    )
+except KeyError:
+    df = pd.DataFrame()
         if not df.empty:
             # 找到有開盤的日期後，直接抓取當天所有資料
             # 註：FinMind 的 daily_adj 若不給 id 有些版本會報錯，
