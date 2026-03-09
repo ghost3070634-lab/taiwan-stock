@@ -118,7 +118,37 @@ def _fetch_daily_price_for_universe(target_date: str) -> pd.DataFrame:
 
     print(f"✅ 成功獲取 {len(out)} 檔股票的最新資料！")
     return out.reset_index(drop=True)
+    
+def _taipei_today() -> date_type:
+    """以台灣時區取得今天日期。"""
+    try:
+        from zoneinfo import ZoneInfo
+        return datetime.now(ZoneInfo("Asia/Taipei")).date()
+    except Exception:
+        return date_type.today()
 
+
+def find_nearest_trading_date_with_data(start_date: date_type, max_days_back: int = 20) -> Tuple[date_type, str]:
+    """
+    因為 OpenAPI 永遠會提供「最新一個交易日」的全市場資料。
+    所以不需要再浪費時間往前遞迴測試，直接回傳預期的計算基準日即可。
+    """
+    ds = start_date.strftime("%Y-%m-%d")
+    return start_date, ds
+
+
+def get_weekly_push_target_date() -> Tuple[date_type, str]:
+    """
+    週報推波日期：
+    - 以台灣時間的「最近一個週五」為基準
+    """
+    today = _taipei_today()
+    # Monday=0 ... Friday=4
+    days_since_friday = (today.weekday() - 4) % 7
+    base_friday = today if days_since_friday == 0 else today - timedelta(days=days_since_friday)
+    
+    # 直接使用 OpenAPI 邏輯，回傳基準日
+    return find_nearest_trading_date_with_data(base_friday, max_days_back=20)
 
 def find_nearest_trading_date_with_data(start_date: date_type, max_days_back: int = 20) -> Tuple[date_type, str]:
     """
